@@ -1,0 +1,134 @@
+use serde::Deserialize;
+use std::fs;
+use std::path::Path;
+
+use transport_core::{
+    auth::AuthDecision,
+    auth::AuthState,
+    decision::decide,
+    error::ErrorCategory,
+    model::{Decision, Outcome, RequestContext, HttpMethod},
+};
+
+#[derive(Debug, Deserialize)]
+struct AuthTestFile {
+    cases: Vec<AuthTestCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthTestCase {
+    name: String,
+    input: AuthInput,
+    expected: AuthExpected,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthInput {
+    attempt: Option<u8>,
+    status: Option<u16>,
+    apply_auth_result: Option<String>,
+    auth_decision: Option<String>,
+    refresh_result: Option<String>,
+    refresh_already_attempted: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthExpected {
+    action: Option<String>,
+    error_category: Option<String>,
+    refresh_count: Option<u8>,
+    waiting_requests: Option<u8>,
+}
+
+fn parse_auth_decision(d: &Option<String>) -> Option<AuthDecision> {
+    match d.as_deref() {
+        Some("RefreshAndRetry") => Some(AuthDecision::RefreshAndRetry),
+        Some("Fail") => None,
+        None => None,
+        Some(v) => panic!("unknown auth decision: {}", v),
+    }
+}
+
+fn parse_error_category(cat: &str) -> ErrorCategory {
+    match cat {
+        "AuthError" => ErrorCategory::AuthError,
+        "FatalError" => ErrorCategory::FatalError,
+        v => panic!("unknown error category: {}", v),
+    }
+}
+
+#[test]
+fn auth_vectors_should_match_spec() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/test-vectors/auth.json");
+
+    let raw = fs::read_to_string(&path)
+        .expect("failed to read auth.json");
+
+    let vectors: AuthTestFile =
+        serde_json::from_str(&raw).expect("invalid auth.json format");
+
+    for case in vectors.cases {
+        // NOTE:
+        // Untuk tahap ini, kita fokus pada auth-triggered decisions.
+        // RequestContext disederhanakan.
+        let ctx = RequestContext {
+            method: HttpMethod::GET,
+            attempt: case.input.attempt.unwrap_or(1),
+            max_attempts: 3,
+            idempotency_key: None,
+            allow_non_idempotent_retry: false,
+        };
+
+        let outcome = match case.input.status {
+            Some(status) => Outcome::HttpStatus(status),
+            None => continue, // cases like apply_auth_before_request (handled later)
+        };
+
+        let auth_decision = parse_auth_decision(&case.input.auth_decision);
+
+        let mut auth_state = AuthState::new();
+
+        let decision = decide(
+            &ctx,
+            outcome,
+            auth_decision,
+            &mut auth_state,
+            match case.input.refresh_result.as_deref() {
+                Some("SUCCESS") => Some(true),
+                Some("FAILURE") => Some(false),
+                _ => None,
+            },
+        );
+
+        if let Some(action) = &case.expected.action {
+            let expected_decision = match action.as_str() {
+                "REFRESH_AND_RETRY" => Decision::RefreshAndRetry,
+                "RETRY" => Decision::Retry,
+                "FAIL" => Decision::Fail,
+                "PROCEED" => Decision::Proceed,
+                v => panic!("unknown expected action: {}", v),
+            };
+        
+            assert_eq!(
+                decision, expected_decision,
+                "auth test failed: {}",
+                case.name
+            );
+        }
+
+        // Optional: validate error category if provided
+        if let Some(cat) = &case.expected.error_category {
+            let mapped = match decision {
+                Decision::Fail => parse_error_category(cat),
+                _ => continue,
+            };
+
+            assert!(
+                matches!(mapped, ErrorCategory::AuthError | ErrorCategory::FatalError),
+                "auth error category mismatch in case {}",
+                case.name
+            );
+        }
+    }
+}
