@@ -1,0 +1,145 @@
+{
+  "description": "Error taxonomy test vectors for transport-core",
+  "cases": [
+    {
+      "name": "map_connection_reset_to_network_error",
+      "input": {
+        "error": "connection_reset"
+      },
+      "expected": {
+        "category": "NetworkError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_dns_failure_to_network_error",
+      "input": {
+        "error": "dns_resolution_failure"
+      },
+      "expected": {
+        "category": "NetworkError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_read_timeout_to_timeout_error",
+      "input": {
+        "error": "read_timeout"
+      },
+      "expected": {
+        "category": "TimeoutError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_write_timeout_to_timeout_error",
+      "input": {
+        "error": "write_timeout"
+      },
+      "expected": {
+        "category": "TimeoutError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_http_401_to_auth_error",
+      "input": {
+        "status": 401
+      },
+      "expected": {
+        "category": "AuthError",
+        "retry_allowed": "conditional"
+      }
+    },
+    {
+      "name": "map_http_403_to_fatal_error",
+      "input": {
+        "status": 403
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_http_404_to_fatal_error",
+      "input": {
+        "status": 404
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_http_409_to_fatal_error",
+      "input": {
+        "status": 409
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_http_422_to_fatal_error",
+      "input": {
+        "status": 422
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_http_429_to_rate_limit_error",
+      "input": {
+        "status": 429
+      },
+      "expected": {
+        "category": "RateLimitError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_http_5xx_to_network_error",
+      "input": {
+        "status": 502
+      },
+      "expected": {
+        "category": "NetworkError",
+        "retry_allowed": true
+      }
+    },
+    {
+      "name": "map_tls_validation_failure_to_fatal_error",
+      "input": {
+        "error": "tls_certificate_validation_failure"
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_invalid_request_to_fatal_error",
+      "input": {
+        "error": "invalid_request_construction"
+      },
+      "expected": {
+        "category": "FatalError",
+        "retry_allowed": false
+      }
+    },
+    {
+      "name": "map_unknown_error_to_unknown_error",
+      "input": {
+        "error": "unexpected_internal_failure"
+      },
+      "expected": {
+        "category": "UnknownError",
+        "retry_allowed": false
+      }
+    }
+  ]
+}

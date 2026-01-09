@@ -1,14 +1,158 @@
-[
-  {
-    "input": { "status": 500 },
-    "expected": { "action": "retry" }
+{
+  "description": "Retry behavior test vectors for transport-core",
+  "default_config": {
+    "max_attempts": 3,
+    "base_delay_ms": 100,
+    "max_delay_ms": 2000
   },
-  {
-    "input": { "status": 401 },
-    "expected": { "action": "refresh_and_retry" }
-  },
-  {
-    "input": { "status": 403 },
-    "expected": { "action": "fail" }
-  }
-]
+  "cases": [
+    {
+      "name": "retry_on_network_error",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "error": "NetworkError"
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 2
+      }
+    },
+    {
+      "name": "retry_on_timeout_error",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "error": "TimeoutError"
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 2
+      }
+    },
+    {
+      "name": "retry_on_500",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 500
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 2
+      }
+    },
+    {
+      "name": "retry_on_429_with_retry_after",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 429,
+        "headers": {
+          "Retry-After": "3"
+        }
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 2,
+        "delay_ms": 3000
+      }
+    },
+    {
+      "name": "retry_on_401_with_refresh",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 401,
+        "auth_decision": "RefreshAndRetry"
+      },
+      "expected": {
+        "action": "REFRESH_AND_RETRY",
+        "next_attempt": 2
+      }
+    },
+    {
+      "name": "fail_on_401_refresh_failed",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 401,
+        "auth_decision": "Fail"
+      },
+      "expected": {
+        "action": "FAIL"
+      }
+    },
+    {
+      "name": "fail_on_403",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 403
+      },
+      "expected": {
+        "action": "FAIL"
+      }
+    },
+    {
+      "name": "fail_on_404",
+      "input": {
+        "method": "GET",
+        "attempt": 1,
+        "status": 404
+      },
+      "expected": {
+        "action": "FAIL"
+      }
+    },
+    {
+      "name": "fail_on_non_idempotent_post_without_key",
+      "input": {
+        "method": "POST",
+        "attempt": 1,
+        "status": 500
+      },
+      "expected": {
+        "action": "FAIL"
+      }
+    },
+    {
+      "name": "retry_on_non_idempotent_post_with_idempotency_key",
+      "input": {
+        "method": "POST",
+        "attempt": 1,
+        "status": 500,
+        "idempotency_key": "abc123",
+        "allow_non_idempotent_retry": true
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 2
+      }
+    },
+    {
+      "name": "stop_retry_when_max_attempts_reached",
+      "input": {
+        "method": "GET",
+        "attempt": 3,
+        "status": 500
+      },
+      "expected": {
+        "action": "FAIL"
+      }
+    },
+    {
+      "name": "retry_uses_exponential_backoff",
+      "input": {
+        "method": "GET",
+        "attempt": 2,
+        "status": 500
+      },
+      "expected": {
+        "action": "RETRY",
+        "next_attempt": 3,
+        "delay_ms": 400
+      }
+    }
+  ]
+}
