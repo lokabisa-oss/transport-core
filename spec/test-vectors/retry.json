@@ -1,0 +1,14 @@
+[
+  {
+    "input": { "status": 500 },
+    "expected": { "action": "retry" }
+  },
+  {
+    "input": { "status": 401 },
+    "expected": { "action": "refresh_and_retry" }
+  },
+  {
+    "input": { "status": 403 },
+    "expected": { "action": "fail" }
+  }
+]
