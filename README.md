@@ -1,5 +1,7 @@
 # transport-core
 
+[![CI](https://github.com/lokabisa-oss/transport-core/actions/workflows/ci.yml/badge.svg)](https://github.com/lokabisa-oss/transport-core/actions/workflows/ci.yml)
+
 A domain-agnostic transport policy engine for building reliable SDKs.
 
 `transport-core` defines a **deterministic, spec-driven core**
