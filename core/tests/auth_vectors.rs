@@ -6,7 +6,7 @@ use transport_core::{
     auth::AuthDecision,
     auth::AuthState,
     decision::decide,
-    model::{Decision, Outcome, RequestContext, HttpMethod, FailReason},
+    model::{Decision, FailReason, HttpMethod, Outcome, RequestContext},
 };
 
 #[derive(Debug, Deserialize)]
@@ -44,17 +44,13 @@ fn parse_auth_decision(d: &Option<String>) -> Option<AuthDecision> {
     }
 }
 
-
 #[test]
 fn auth_vectors_should_match_spec() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../spec/test-vectors/auth.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/test-vectors/auth.json");
 
-    let raw = fs::read_to_string(&path)
-        .expect("failed to read auth.json");
+    let raw = fs::read_to_string(&path).expect("failed to read auth.json");
 
-    let vectors: AuthTestFile =
-        serde_json::from_str(&raw).expect("invalid auth.json format");
+    let vectors: AuthTestFile = serde_json::from_str(&raw).expect("invalid auth.json format");
 
     for case in vectors.cases {
         // NOTE:
@@ -92,12 +88,7 @@ fn auth_vectors_should_match_spec() {
         if let Some(action) = &case.expected.action {
             let actual_action = decision_action(&decision);
 
-            assert_eq!(
-                actual_action,
-                action,
-                "auth test failed: {}",
-                case.name
-            );
+            assert_eq!(actual_action, action, "auth test failed: {}", case.name);
         }
 
         // Optional: validate error category if provided
@@ -124,10 +115,8 @@ fn auth_vectors_should_match_spec() {
                 }
             }
         }
-        
     }
 }
-
 
 fn decision_action(decision: &Decision) -> &'static str {
     match decision {

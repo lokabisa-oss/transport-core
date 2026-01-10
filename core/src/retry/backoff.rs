@@ -1,9 +1,6 @@
-use crate::model::{RetryReason, RequestContext};
+use crate::model::{RequestContext, RetryReason};
 
-pub fn retry_delay_ms(
-    _ctx: &RequestContext,
-    reason: RetryReason,
-) -> u32 {
+pub fn retry_delay_ms(_ctx: &RequestContext, reason: RetryReason) -> u32 {
     match reason {
         RetryReason::NetworkError => 200,
         RetryReason::Timeout => 500,

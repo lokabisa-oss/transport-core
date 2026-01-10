@@ -31,8 +31,8 @@ pub extern "C" fn tc_client_free(ptr: *mut transport_core_client) {
  * tc_decide (ABI entrypoint)
  * ============================ */
 
- #[repr(C)]
- #[allow(non_camel_case_types)]
+#[repr(C)]
+#[allow(non_camel_case_types)]
 pub enum tc_decision_t {
     TC_DECISION_PROCEED = 0,
     TC_DECISION_RETRY = 1,
@@ -87,7 +87,6 @@ pub struct tc_outcome_t {
     pub retry_after_ms: u32,
 }
 
-
 #[no_mangle]
 pub extern "C" fn tc_decide(
     client: *mut transport_core_client,
@@ -134,7 +133,9 @@ pub extern "C" fn tc_decide(
             } else {
                 Some(outcome.retry_after_ms)
             };
-            Outcome::RateLimited { retry_after_ms: hint }
+            Outcome::RateLimited {
+                retry_after_ms: hint,
+            }
         }
         tc_outcome_kind_t::TC_OUTCOME_BLOCKED => Outcome::Blocked,
         tc_outcome_kind_t::TC_OUTCOME_CAPTCHA => Outcome::Captcha,
@@ -163,22 +164,17 @@ pub extern "C" fn tc_decide(
 
     match decision {
         Decision::Proceed => tc_decision_t::TC_DECISION_PROCEED,
-    
-        Decision::Retry { .. } =>
-            tc_decision_t::TC_DECISION_RETRY,
-    
-        Decision::RefreshAndRetry { .. } =>
-            tc_decision_t::TC_DECISION_REFRESH_AND_RETRY,
-    
-        Decision::Fail { .. } =>
-            tc_decision_t::TC_DECISION_FAIL,
-    }    
+
+        Decision::Retry { .. } => tc_decision_t::TC_DECISION_RETRY,
+
+        Decision::RefreshAndRetry { .. } => tc_decision_t::TC_DECISION_REFRESH_AND_RETRY,
+
+        Decision::Fail { .. } => tc_decision_t::TC_DECISION_FAIL,
+    }
 }
 
 #[no_mangle]
-pub extern "C" fn tc_last_retry_after_ms(
-    client: *const transport_core_client,
-) -> u32 {
+pub extern "C" fn tc_last_retry_after_ms(client: *const transport_core_client) -> u32 {
     if client.is_null() {
         return 0;
     }
@@ -193,9 +189,7 @@ pub extern "C" fn tc_last_retry_after_ms(
 }
 
 #[no_mangle]
-pub extern "C" fn tc_last_retry_reason(
-    client: *const transport_core_client,
-) -> u8 {
+pub extern "C" fn tc_last_retry_reason(client: *const transport_core_client) -> u8 {
     if client.is_null() {
         return 0;
     }
@@ -209,9 +203,7 @@ pub extern "C" fn tc_last_retry_reason(
 }
 
 #[no_mangle]
-pub extern "C" fn tc_last_fail_reason(
-    client: *const transport_core_client,
-) -> u8 {
+pub extern "C" fn tc_last_fail_reason(client: *const transport_core_client) -> u8 {
     if client.is_null() {
         return 0;
     }
@@ -225,9 +217,7 @@ pub extern "C" fn tc_last_fail_reason(
 }
 
 #[no_mangle]
-pub extern "C" fn tc_last_fail_retryable(
-    client: *const transport_core_client,
-) -> bool {
+pub extern "C" fn tc_last_fail_retryable(client: *const transport_core_client) -> bool {
     if client.is_null() {
         return false;
     }

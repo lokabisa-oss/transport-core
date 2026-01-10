@@ -1,18 +1,8 @@
 use crate::{
     auth::{AuthDecision, AuthState},
     error::{classify_http_status, ErrorCategory},
-    model::{
-        Decision,
-        Outcome,
-        RequestContext,
-        RetryReason,
-        FailReason,
-    },
-    retry::{
-        can_retry,
-        retry_delay_ms,
-        clamp_retry_after,
-    },
+    model::{Decision, FailReason, Outcome, RequestContext, RetryReason},
+    retry::{can_retry, clamp_retry_after, retry_delay_ms},
 };
 
 pub fn decide(
@@ -42,13 +32,11 @@ pub fn decide(
                 }
             }
         }
-    
-        Outcome::Blocked | Outcome::Captcha => {
-            Decision::Fail {
-                reason: FailReason::HardBlocked,
-                retryable: false,
-            }
-        }
+
+        Outcome::Blocked | Outcome::Captcha => Decision::Fail {
+            reason: FailReason::HardBlocked,
+            retryable: false,
+        },
 
         Outcome::NetworkError => {
             if can_retry(ctx) {
@@ -117,9 +105,7 @@ pub fn decide(
                                     retryable: false,
                                 }
                             }
-                            None => Decision::RefreshAndRetry {
-                                after_ms: 0,
-                            },
+                            None => Decision::RefreshAndRetry { after_ms: 0 },
                         }
                     }
                     _ => Decision::Fail {

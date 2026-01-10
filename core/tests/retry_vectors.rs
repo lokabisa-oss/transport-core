@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use std::fs;
 
-
 use transport_core::{
     auth::AuthDecision,
     auth::AuthState,
@@ -82,14 +81,12 @@ fn parse_outcome(input: &RetryInput) -> Outcome {
 
 #[test]
 fn retry_vectors_should_match_spec() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../spec/test-vectors/retry.json");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/test-vectors/retry.json");
 
-    let raw = fs::read_to_string(&path)
-        .expect("failed to read retry.json");
+    let raw = fs::read_to_string(&path).expect("failed to read retry.json");
 
-    let vectors: RetryTestFile =
-        serde_json::from_str(&raw).expect("invalid retry.json format");
+    let vectors: RetryTestFile = serde_json::from_str(&raw).expect("invalid retry.json format");
 
     for case in vectors.cases {
         let ctx = RequestContext {
@@ -97,30 +94,20 @@ fn retry_vectors_should_match_spec() {
             attempt: case.input.attempt,
             max_attempts: 3,
             idempotency_key: case.input.idempotency_key.clone(),
-            allow_non_idempotent_retry: case
-                .input
-                .allow_non_idempotent_retry
-                .unwrap_or(false),
+            allow_non_idempotent_retry: case.input.allow_non_idempotent_retry.unwrap_or(false),
         };
 
         let outcome = parse_outcome(&case.input);
         let auth_decision = parse_auth_decision(&case.input.auth_decision);
 
         let mut auth_state = AuthState::new();
-        
-        let decision = decide(
-            &ctx,
-            outcome,
-            auth_decision,
-            &mut auth_state,
-            None,
-        );
+
+        let decision = decide(&ctx, outcome, auth_decision, &mut auth_state, None);
 
         let actual_action = decision_action(&decision);
 
         assert_eq!(
-            actual_action,
-            case.expected.action,
+            actual_action, case.expected.action,
             "retry test failed: {}",
             case.name
         );
@@ -132,7 +119,6 @@ fn retry_vectors_should_match_spec() {
         }
     }
 }
-
 
 fn decision_action(decision: &Decision) -> &'static str {
     match decision {

@@ -2,10 +2,7 @@ use crate::model::{HttpMethod, RequestContext};
 
 mod backoff;
 
-pub use backoff::{
-    retry_delay_ms,
-    clamp_retry_after,
-};
+pub use backoff::{clamp_retry_after, retry_delay_ms};
 
 pub fn is_idempotent(method: &HttpMethod) -> bool {
     matches!(

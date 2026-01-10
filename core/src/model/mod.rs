@@ -26,9 +26,7 @@ pub enum Outcome {
     TimeoutError,
 
     // Semantic (preferred)
-    RateLimited {
-        retry_after_ms: Option<u32>,
-    },
+    RateLimited { retry_after_ms: Option<u32> },
     Blocked,
     Captcha,
 
@@ -36,23 +34,14 @@ pub enum Outcome {
     HttpStatus(u16),
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Decision {
     Proceed,
-    Retry {
-        after_ms: u32,
-        reason: RetryReason,
-    },
+    Retry { after_ms: u32, reason: RetryReason },
 
-    RefreshAndRetry {
-        after_ms: u32,
-    },
+    RefreshAndRetry { after_ms: u32 },
 
-    Fail {
-        reason: FailReason,
-        retryable: bool,
-    },
+    Fail { reason: FailReason, retryable: bool },
 }
 
 #[repr(u8)]
@@ -72,4 +61,3 @@ pub enum FailReason {
     HardBlocked = 3,
     Unknown = 255,
 }
-
