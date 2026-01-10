@@ -1,0 +1,11 @@
+[project]
+name = "transport-core"
+version = "0.1.0"
+description = "Python bindings for transport-core"
+requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "MIT" }
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
