@@ -36,7 +36,6 @@ struct RetryInput {
 #[derive(Debug, Deserialize)]
 struct RetryExpected {
     action: String,
-    next_attempt: Option<u8>,
 }
 
 fn parse_method(m: &str) -> HttpMethod {

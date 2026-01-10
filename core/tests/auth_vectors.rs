@@ -6,7 +6,6 @@ use transport_core::{
     auth::AuthDecision,
     auth::AuthState,
     decision::decide,
-    error::ErrorCategory,
     model::{Decision, Outcome, RequestContext, HttpMethod, FailReason},
 };
 
@@ -26,18 +25,14 @@ struct AuthTestCase {
 struct AuthInput {
     attempt: Option<u8>,
     status: Option<u16>,
-    apply_auth_result: Option<String>,
     auth_decision: Option<String>,
     refresh_result: Option<String>,
-    refresh_already_attempted: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AuthExpected {
     action: Option<String>,
     error_category: Option<String>,
-    refresh_count: Option<u8>,
-    waiting_requests: Option<u8>,
 }
 
 fn parse_auth_decision(d: &Option<String>) -> Option<AuthDecision> {
@@ -49,13 +44,6 @@ fn parse_auth_decision(d: &Option<String>) -> Option<AuthDecision> {
     }
 }
 
-fn parse_error_category(cat: &str) -> ErrorCategory {
-    match cat {
-        "AuthError" => ErrorCategory::AuthError,
-        "FatalError" => ErrorCategory::FatalError,
-        v => panic!("unknown error category: {}", v),
-    }
-}
 
 #[test]
 fn auth_vectors_should_match_spec() {
