@@ -16,5 +16,13 @@ venv/
 *.dylib
 *.dll
 
-# Local experiments
-ffi_test/
+# C / FFI smoke test binaries
+ffi_test/smoke_test
+ffi_test/smoke_rate_limited
+ffi_test/*.o
+
+# General binaries
+*.o
+*.so
+*.a
+*.out

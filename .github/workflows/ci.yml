@@ -94,6 +94,7 @@ jobs:
       - name: Run python smoke tests
         working-directory: bindings/python
         env:
+          TRANSPORT_CORE_LIB: ${{ github.workspace }}/core/target/release/libtransport_core.so
           LD_LIBRARY_PATH: ${{ github.workspace }}/core/target/release
         run: |
           pytest -v

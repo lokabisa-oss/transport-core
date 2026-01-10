@@ -9,19 +9,41 @@ from typing import Optional
 # ============================================================
 
 def _load_library():
-    base = os.path.dirname(__file__)
+    candidates = []
 
-    if sys.platform.startswith("linux"):
-        name = "libtransport_core.so"
-    elif sys.platform == "darwin":
-        name = "libtransport_core.dylib"
-    elif sys.platform == "win32":
-        name = "transport_core.dll"
-    else:
-        raise RuntimeError(f"unsupported platform: {sys.platform}")
+    # 1. Explicit env override (BEST PRACTICE)
+    if "TRANSPORT_CORE_LIB" in os.environ:
+        candidates.append(os.environ["TRANSPORT_CORE_LIB"])
 
-    path = os.path.join(base, name)
-    return ctypes.CDLL(path)
+    # 2. Local package (optional, for dev)
+    candidates.append(
+        os.path.join(os.path.dirname(__file__), "libtransport_core.so")
+    )
+
+    # 3. CI / build artifact
+    candidates.append(
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..", "..", "..", "core", "target", "release", "libtransport_core.so"
+            )
+        )
+    )
+
+    # 4. System loader (LD_LIBRARY_PATH)
+    candidates.append("libtransport_core.so")
+
+    for path in candidates:
+        try:
+            return ctypes.CDLL(path)
+        except OSError:
+            continue
+
+    raise OSError(
+        "libtransport_core.so not found. "
+        "Set TRANSPORT_CORE_LIB or build core first."
+    )
+
 
 
 _lib = _load_library()
