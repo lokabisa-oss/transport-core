@@ -147,6 +147,8 @@ This ABI exists to make transport behavior:
 - Consistent
 - Testable
 - Reusable
-- Language-independent
+-
+
+Language-independent
 
 It intentionally keeps the surface area minimal.

@@ -1,33 +1,68 @@
-# Error Taxonomy Specification
+# Error Mapping — Host-Level Guidance
 
-This document defines the canonical error taxonomy for `transport-core`.
+⚠️ **Non-normative document**
 
-All implementations (native, WASM, and reimplementations such as Go) MUST map
-internal errors to the categories defined in this document.
+This document provides **host-side guidance** for mapping language-specific,
+runtime, or transport errors into semantic `Outcome` values consumed by
+`transport-core`.
 
-Error behavior is defined by category, not by language-specific error types.
+The **canonical and normative behavior** of error handling and retry decisions
+is defined in [`spec/README.md`](./README.md).
 
 ---
 
 ## 1. Purpose
 
-This specification ensures that all SDKs built on top of `transport-core`
-expose consistent error semantics, regardless of programming language
-or runtime environment.
+This document aims to help host implementations achieve:
 
-The goal is behavioral consistency, not identical error objects.
+- consistent semantic error mapping
+- deterministic retry behavior
+- cross-language behavioral parity
+
+It does NOT define a core error taxonomy.
 
 ---
 
-## 2. Error Categories
+## 2. Core Design Recap
 
-All errors MUST be mapped to exactly one of the following categories.
+`transport-core`:
 
-### 2.1 NetworkError
+- does NOT receive error objects
+- does NOT classify language-specific errors
+- does NOT understand protocols, TLS, or parsing errors
 
-Represents failures occurring at the network transport layer.
+Instead:
 
-Includes:
+> **Hosts interpret errors.  
+> The core interprets semantics.**
+
+---
+
+## 3. Semantic Outcomes (Core Input)
+
+Hosts SHOULD map errors into one of the following semantic outcomes:
+
+```text
+Outcome =
+  NetworkError
+  TimeoutError
+  RateLimited { retry_after_ms?: u32 }
+  Blocked
+  Captcha
+  HttpStatus(u16)   // legacy fallback
+```
+
+## 4. Recommended Error Mapping
+
+### 4.1 Network-Level Failures
+
+The following SHOULD be mapped to:
+
+```text
+Outcome::NetworkError
+```
+
+Examples:
 
 - Connection reset
 - Connection refused
@@ -35,170 +70,118 @@ Includes:
 - Broken pipe
 - Network unreachable
 
-Excludes:
+### 4.2 Timeout Failures
 
-- Timeouts (see TimeoutError)
-- TLS validation failures (see FatalError)
+The following SHOULD be mapped to:
 
----
+```text
+Outcome::TimeoutError
+```
 
-### 2.2 TimeoutError
-
-Represents failures caused by exceeding configured time limits.
-
-Includes:
+Examples:
 
 - Connection timeout
 - Read timeout
 - Write timeout
-- Overall request timeout
+- Request deadline exceeded
 
-TimeoutError MAY be retryable depending on retry rules.
+### 4.3 Rate Limiting
 
----
+Rate limiting signals SHOULD be mapped to:
 
-### 2.3 AuthError
+```text
+Outcome::RateLimited { retry_after_ms?: u32 }
+```
 
-Represents authentication and authorization failures.
-
-Includes:
-
-- HTTP 401 responses
-- Failed token refresh
-- Missing or invalid authentication credentials
-
-Excludes:
-
-- HTTP 403 responses (see FatalError)
-
-AuthError MAY trigger refresh behavior as defined in `auth.md`.
-
----
-
-### 2.4 RateLimitError
-
-Represents rate limiting by the remote service.
-
-Includes:
+Examples:
 
 - HTTP 429 responses
-- Explicit rate limit signals from headers or metadata
+- Explicit quota exceeded signals
+- Gateway throttling
 
-RateLimitError MAY be retryable according to retry rules.
+Retry delay hints MAY be extracted by the host.
 
----
+### 4.4 Blocking and Challenges
 
-### 2.5 FatalError
+The following SHOULD be mapped to hard failure outcomes:
 
-Represents non-recoverable errors.
+```text
+Outcome::Blocked
+Outcome::Captcha
+```
 
-Includes:
+Examples:
 
-- HTTP 400, 403, 404, 409, 422
-- TLS certificate validation failure
-- Invalid request construction
-- Protocol violations
-- Deserialization errors
+- IP blocking
+- WAF rejection
+- Bot challenges
 
-FatalError MUST NOT be retried.
+These outcomes are never retryable.
 
----
+### 4.5 Legacy HTTP Status Fallback
 
-### 2.6 UnknownError
+If semantic mapping is not possible, hosts MAY use:
 
-Represents errors that cannot be classified.
+```text
+Outcome::HttpStatus(u16)
+```
 
-Includes:
+Notes:
 
-- Unexpected internal failures
-- Unrecognized error responses
-
-UnknownError MUST be treated as FatalError unless explicitly overridden.
-
----
-
-## 3. Error Mapping Rules
-
-### 3.1 Single Category Rule
-
-Each error MUST be mapped to exactly one error category.
-
-Errors MUST NOT belong to multiple categories.
+- Retry is NOT guaranteed for this outcome
+- Hosts SHOULD avoid relying on this path
 
 ---
 
-### 3.2 Language-Specific Errors
+## 5. Authentication-Related Errors
 
-Implementations MAY expose language-specific error types, but:
+Authentication failures SHOULD be mapped based on host logic:
 
-- Each error MUST clearly map to one canonical category
-- The canonical category MUST be discoverable programmatically
+- Authentication expired → `HttpStatus(401)` + `AuthDecision`
+- Authorization denied → `HttpStatus(403)`
+- Refresh failure → host reports refresh failure to core
 
----
+The core does NOT inspect authentication errors directly.
 
-## 4. Interaction with Retry Semantics
+## 6. Determinism Guidelines
 
-Retry behavior is determined by error category:
+To ensure deterministic behavior:
 
-| Error Category | Retry Allowed |
-| -------------- | ------------- |
-| NetworkError   | Yes           |
-| TimeoutError   | Yes           |
-| AuthError      | Conditional   |
-| RateLimitError | Yes           |
-| FatalError     | No            |
-| UnknownError   | No            |
-
-Retry rules defined in `retry.md` MUST still be enforced.
+- Error-to-outcome mapping MUST be consistent
+- The same runtime error MUST map to the same `Outcome`
+- Mapping SHOULD NOT depend on timing or environment variance
 
 ---
 
-## 5. Interaction with Authentication
+## 7. Observability Recommendations
 
-- AuthError MAY trigger refresh behavior as defined in `auth.md`
-- FatalError MUST NOT trigger authentication refresh
-- RateLimitError MUST NOT trigger authentication refresh
+Hosts SHOULD emit observable metadata including:
 
----
-
-## 6. Error Propagation
-
-When an error is returned to the caller:
-
-- The canonical error category MUST be preserved
-- The original error message MAY be included for debugging
-- Sensitive information MUST NOT be exposed
-
----
-
-## 7. Observability Requirements
-
-Error events MUST emit observable metadata, including:
-
-- Error category
-- Retry decision (if any)
+- Mapped `Outcome`
+- Core `Decision`
+- Retry reason (if any)
 - Attempt number
 
-Observability output MUST NOT include credentials or secrets.
+Sensitive data MUST NOT be logged.
 
 ---
 
-## 8. Determinism Guarantee
+## 8. Explicit Non-Goals
 
-Given the same error inputs, error categorization MUST be deterministic.
+This document does NOT define:
 
-Non-deterministic or environment-dependent categorization is considered
-a specification violation.
+- Language-specific error types
+- Error object structures
+- Stack traces or debugging formats
+- Transport library behavior
 
 ---
 
-## 9. Compliance
+## 9. Summary
 
-An implementation is considered compliant if:
+- Error taxonomy lives in the host
+- Semantic outcome lives in the core
+- Consistent mapping ensures consistent behavior
 
-- All errors are mapped to a defined category
-- Retry behavior matches the category rules
-- Authentication interaction follows `auth.md`
-- Identical inputs produce identical error categorization
-
-The Rust implementation serves as a reference, but behavior is defined by this specification.
+> **Errors are interpreted outside.  
+> Decisions are made inside.**

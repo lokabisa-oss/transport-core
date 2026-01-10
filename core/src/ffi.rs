@@ -7,12 +7,14 @@ use crate::{
 #[repr(C)]
 pub struct transport_core_client {
     auth_state: AuthState,
+    last_decision: Option<Decision>,
 }
 
 #[no_mangle]
 pub extern "C" fn tc_client_new() -> *mut transport_core_client {
     Box::into_raw(Box::new(transport_core_client {
         auth_state: AuthState::new(),
+        last_decision: None,
     }))
 }
 
@@ -62,6 +64,11 @@ pub enum tc_outcome_kind_t {
     TC_OUTCOME_NETWORK_ERROR = 0,
     TC_OUTCOME_TIMEOUT_ERROR,
     TC_OUTCOME_HTTP_STATUS,
+
+    // NEW semantic outcomes
+    TC_OUTCOME_RATE_LIMITED,
+    TC_OUTCOME_BLOCKED,
+    TC_OUTCOME_CAPTCHA,
 }
 
 #[repr(C)]
@@ -77,7 +84,9 @@ pub struct tc_request_context_t {
 pub struct tc_outcome_t {
     pub kind: tc_outcome_kind_t,
     pub http_status: u16,
+    pub retry_after_ms: u32,
 }
+
 
 #[no_mangle]
 pub extern "C" fn tc_decide(
@@ -118,6 +127,17 @@ pub extern "C" fn tc_decide(
         tc_outcome_kind_t::TC_OUTCOME_NETWORK_ERROR => Outcome::NetworkError,
         tc_outcome_kind_t::TC_OUTCOME_TIMEOUT_ERROR => Outcome::TimeoutError,
         tc_outcome_kind_t::TC_OUTCOME_HTTP_STATUS => Outcome::HttpStatus(outcome.http_status),
+
+        tc_outcome_kind_t::TC_OUTCOME_RATE_LIMITED => {
+            let hint = if outcome.retry_after_ms == 0 {
+                None
+            } else {
+                Some(outcome.retry_after_ms)
+            };
+            Outcome::RateLimited { retry_after_ms: hint }
+        }
+        tc_outcome_kind_t::TC_OUTCOME_BLOCKED => Outcome::Blocked,
+        tc_outcome_kind_t::TC_OUTCOME_CAPTCHA => Outcome::Captcha,
     };
 
     let auth_decision = match auth_decision {
@@ -139,10 +159,83 @@ pub extern "C" fn tc_decide(
         refresh_result,
     );
 
+    client.last_decision = Some(decision.clone());
+
     match decision {
         Decision::Proceed => tc_decision_t::TC_DECISION_PROCEED,
-        Decision::Retry => tc_decision_t::TC_DECISION_RETRY,
-        Decision::RefreshAndRetry => tc_decision_t::TC_DECISION_REFRESH_AND_RETRY,
-        Decision::Fail => tc_decision_t::TC_DECISION_FAIL,
+    
+        Decision::Retry { .. } =>
+            tc_decision_t::TC_DECISION_RETRY,
+    
+        Decision::RefreshAndRetry { .. } =>
+            tc_decision_t::TC_DECISION_REFRESH_AND_RETRY,
+    
+        Decision::Fail { .. } =>
+            tc_decision_t::TC_DECISION_FAIL,
+    }    
+}
+
+#[no_mangle]
+pub extern "C" fn tc_last_retry_after_ms(
+    client: *const transport_core_client,
+) -> u32 {
+    if client.is_null() {
+        return 0;
+    }
+
+    let client = unsafe { &*client };
+
+    match &client.last_decision {
+        Some(Decision::Retry { after_ms, .. }) => *after_ms,
+        Some(Decision::RefreshAndRetry { after_ms }) => *after_ms,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tc_last_retry_reason(
+    client: *const transport_core_client,
+) -> u8 {
+    if client.is_null() {
+        return 0;
+    }
+
+    let client = unsafe { &*client };
+
+    match &client.last_decision {
+        Some(Decision::Retry { reason, .. }) => *reason as u8,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tc_last_fail_reason(
+    client: *const transport_core_client,
+) -> u8 {
+    if client.is_null() {
+        return 0;
+    }
+
+    let client = unsafe { &*client };
+
+    match &client.last_decision {
+        Some(Decision::Fail { reason, .. }) => *reason as u8,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tc_last_fail_retryable(
+    client: *const transport_core_client,
+) -> bool {
+    if client.is_null() {
+        return false;
+    }
+
+    let client = unsafe { &*client };
+
+    match &client.last_decision {
+        Some(Decision::Fail { retryable, .. }) => *retryable,
+        _ => false,
     }
 }

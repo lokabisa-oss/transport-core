@@ -7,7 +7,7 @@ use transport_core::{
     auth::AuthState,
     decision::decide,
     error::ErrorCategory,
-    model::{Decision, Outcome, RequestContext, HttpMethod},
+    model::{Decision, Outcome, RequestContext, HttpMethod, FailReason},
 };
 
 #[derive(Debug, Deserialize)]
@@ -102,16 +102,11 @@ fn auth_vectors_should_match_spec() {
         );
 
         if let Some(action) = &case.expected.action {
-            let expected_decision = match action.as_str() {
-                "REFRESH_AND_RETRY" => Decision::RefreshAndRetry,
-                "RETRY" => Decision::Retry,
-                "FAIL" => Decision::Fail,
-                "PROCEED" => Decision::Proceed,
-                v => panic!("unknown expected action: {}", v),
-            };
-        
+            let actual_action = decision_action(&decision);
+
             assert_eq!(
-                decision, expected_decision,
+                actual_action,
+                action,
                 "auth test failed: {}",
                 case.name
             );
@@ -119,16 +114,38 @@ fn auth_vectors_should_match_spec() {
 
         // Optional: validate error category if provided
         if let Some(cat) = &case.expected.error_category {
-            let mapped = match decision {
-                Decision::Fail => parse_error_category(cat),
-                _ => continue,
-            };
-
             assert!(
-                matches!(mapped, ErrorCategory::AuthError | ErrorCategory::FatalError),
-                "auth error category mismatch in case {}",
+                decision_action(&decision) == "FAIL",
+                "expected FAIL for error category {} in case {}",
+                cat,
                 case.name
             );
         }
+
+        if let Some(cat) = &case.expected.error_category {
+            if let Decision::Fail { reason, .. } = &decision {
+                match cat.as_str() {
+                    "AuthError" => {
+                        assert!(
+                            matches!(reason, FailReason::AuthFailed),
+                            "expected AuthFailed in case {}",
+                            case.name
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+    }
+}
+
+
+fn decision_action(decision: &Decision) -> &'static str {
+    match decision {
+        Decision::Proceed => "PROCEED",
+        Decision::Retry { .. } => "RETRY",
+        Decision::RefreshAndRetry { .. } => "REFRESH_AND_RETRY",
+        Decision::Fail { .. } => "FAIL",
     }
 }

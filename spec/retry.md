@@ -1,202 +1,250 @@
-# Retry Semantics Specification
+# Retry Semantics — Host-Level Guidance
 
-This document defines the canonical retry behavior for `transport-core`.
+⚠️ **Non-normative document**
 
-All implementations (native, WASM, and reimplementations such as Go) MUST follow the rules defined in this document exactly.
+This document provides **host-side guidance** for retry behavior when using
+`transport-core`.
 
-Retry behavior is defined by outcome and context, not by transport library.
+The **canonical and normative specification** for retry behavior is defined in
+[`spec/README.md`](./README.md).
 
----
-
-## 1. Definitions
-
-### Attempt
-
-An **attempt** is a single transmission of a request over the network.
-
-- The initial request counts as attempt #1
-- Each retry increments the attempt counter
-
-### Retryable
-
-A **retryable outcome** is a response or error condition that allows the request to be attempted again.
-
-### Idempotent Request
-
-A request is **idempotent** if repeating it produces the same effect.
-
-The following HTTP methods are considered idempotent by default:
-
-- GET
-- HEAD
-- PUT
-- DELETE
-- OPTIONS
-
-All other methods are **non-idempotent** unless explicitly marked otherwise.
+This document explains **how a host SHOULD map runtime or transport conditions**
+into semantic `Outcome` values consumed by `transport-core`.
 
 ---
 
-## 2. Retry Eligibility Rules
+## 1. Scope and Responsibility
 
-### 2.1 Retryable Network Errors
+### What This Document Is
 
-The client MUST retry on the following network-level errors:
+- Guidance for **host implementations**
+- Examples of mapping errors to `Outcome`
+- Recommended retry strategies
+- Non-binding recommendations
+
+### What This Document Is NOT
+
+- ❌ It is NOT the core specification
+- ❌ It does NOT override `spec/README.md`
+- ❌ It does NOT define ABI or policy guarantees
+
+---
+
+## 2. Core Design Recap
+
+`transport-core` is:
+
+- semantic-first
+- policy-only
+- deterministic
+- IO-free
+
+Therefore:
+
+> **The host decides the meaning of an error.  
+> The core decides what action to take.**
+
+---
+
+## 3. Semantic Outcome Mapping (Host Responsibility)
+
+Hosts SHOULD translate runtime or transport errors into semantic `Outcome` values.
+
+### 3.1 Network-Level Errors
+
+The following conditions SHOULD be mapped to:
+
+```text
+Outcome::NetworkError
+```
+
+Examples:
 
 - Connection reset
 - Connection refused
 - DNS resolution failure
+- Unexpected socket close
+
+### 3.2 Timeout Conditions
+
+The following conditions SHOULD be mapped to:
+
+```text
+Outcome::TimeoutError
+```
+
+Examples:
+
 - Read timeout
 - Write timeout
+- Request deadline exceeded
 
-The client MUST NOT retry on:
+### 3.3 Rate Limiting
 
-- Invalid request construction
-- TLS certificate validation failure
+When a service indicates throttling or rate limiting, the host SHOULD map to:
 
----
+```text
+Outcome::RateLimited { retry_after_ms?: u32 }
+```
 
-### 2.2 Retryable HTTP Status Codes
+Sources:
 
-| Status Code | Behavior                                           |
-| ----------- | -------------------------------------------------- |
-| 500–599     | Retry                                              |
-| 429         | Retry (respect `Retry-After`)                      |
-| 401         | Conditional retry (see Authentication Interaction) |
+- HTTP 429 responses
+- API-specific rate limit signals
+- Gateway throttling responses
 
----
+**Retry-After Hint**
 
-### 2.3 Non-Retryable HTTP Status Codes
+If available, the host MAY extract a retry delay hint and pass it as:
 
-The client MUST NOT retry on:
+```text
+retry_after_ms
+```
 
-- 400
-- 403
-- 404
-- 409
-- 422
+Notes:
 
-These responses MUST fail immediately.
+- This value is a hint, not a command
+- The core may clamp or ignore it
+- Header parsing is strictly host responsibility
 
----
+### 3.4 Blocking and Challenges
 
-## 3. Idempotency Rules
+The following conditions SHOULD be mapped to hard failure outcomes:
 
-### 3.1 Default Behavior
+```text
+Outcome::Blocked
+Outcome::Captcha
+```
 
-Retries MUST only be performed for idempotent requests.
+Examples:
 
----
+- IP blocked
+- WAF rejection
+- CAPTCHA or bot challenge detected
 
-### 3.2 Override for Non-Idempotent Requests
+These outcomes are never retryable.
 
-A non-idempotent request MAY be retried only if ALL of the following are true:
+### 3.5 Legacy HTTP Status Mapping
 
-- An explicit idempotency key is provided
-- The transport configuration explicitly allows retries
+If semantic mapping is not possible, hosts MAY fall back to:
 
-If these conditions are not met, the request MUST fail immediately.
+```text
+Outcome::HttpStatus(u16)
+```
 
----
+However:
 
-## 4. Retry Limits
-
-### 4.1 Maximum Attempts
-
-- Default maximum attempts: **3**
-- This count includes the initial attempt
-
----
-
-### 4.2 Termination Conditions
-
-The client MUST stop retrying when:
-
-- The maximum number of attempts is reached, OR
-- A non-retryable condition is encountered
+- Retry is NOT guaranteed for raw HTTP status
+- Hosts SHOULD avoid relying on this path for retry logic
 
 ---
 
-## 5. Backoff Strategy
+## 4. Authentication Interaction (Host Perspective)
 
-### 5.1 Backoff Algorithm
+When receiving authentication failures (e.g. HTTP 401):
 
-The client MUST use exponential backoff.
+1. The host consults its authentication provider
+2. The provider returns:
 
-Formula:
+- `RefreshAndRetry`
+- or `Fail`
 
-delay = min(base_delay \* (2 ^ attempt), max_delay)
+3. The host passes this decision into `transport-core`
 
-Where:
-
-- `attempt` starts at 1 for the first retry
-- `base_delay` default: 100 milliseconds
-- `max_delay` default: 2000 milliseconds
+Only one refresh attempt SHOULD be performed per request lifecycle.
 
 ---
 
-### 5.2 Retry-After Handling
+## 5. Idempotency Considerations
 
-For HTTP 429 responses:
+### 5.1 Idempotency Is Not Sufficient
 
-- If a `Retry-After` header is present:
-  - The client MUST wait for the specified duration
-- If the header is not present:
-  - The client MUST fall back to exponential backoff
+Providing an idempotency key or enabling non-idempotent retry:
 
----
+- does NOT guarantee retry
+- does NOT override semantic outcome rules
 
-## 6. Authentication Interaction
+Retry still requires:
 
-Retry behavior MUST integrate with authentication rules.
-
-On receiving HTTP 401:
-
-1. The client MUST consult the authentication provider
-2. If the provider returns `RefreshAndRetry`:
-   - A token refresh MUST be attempted
-   - On success, the original request MUST be retried
-3. If refresh fails:
-   - The request MUST fail
-
-Only one token refresh operation MAY be in progress at a time.
+1. A retryable `Outcome`
+2. Approval by core retry policy
 
 ---
 
-## 7. Concurrency Rules
+### 5.2 Recommended Host Behavior
 
-- Retry counters are scoped per request
-- Concurrent requests MUST NOT share retry state
-- Authentication refresh state MAY be shared across concurrent requests
+Hosts SHOULD:
 
----
-
-## 8. Observability Requirements
-
-Each retry MUST emit metadata including:
-
-- Attempt number
-- Retry reason
-- Backoff duration
-
-These signals MUST be observable by the host runtime.
+- Avoid retrying non-idempotent requests by default
+- Enable retries only with:
+  - explicit idempotency key
+  - explicit configuration
+  - retryable semantic outcome
 
 ---
 
-## 9. Determinism Guarantee
+## 6. Retry Limits and Attempts
 
-Given the same inputs (request, responses, timing), retry behavior MUST be deterministic.
-
-Random jitter MUST NOT be used unless explicitly enabled by configuration.
+- `attempt` and `max_attempts` are host-managed
+- The core does NOT increment attempts
+- Hosts MUST stop retrying when:
+  - the core returns `Fail`
+  - `attempt >= max_attempts`
 
 ---
 
-## 10. Compliance
+## 7. Backoff Strategy (Host-Level Policy)
 
-An implementation is considered compliant if:
+Backoff behavior is not part of the core contract.
 
-- It follows all retry eligibility rules
-- It respects idempotency constraints
-- It produces identical decisions for identical inputs
+Hosts MAY implement:
 
-The Rust implementation serves as a reference, but behavior is defined by this specification.
+- exponential backoff
+- fixed delay
+- jitter
+- adaptive strategies
+
+The core returns:
+
+- recommended retry delay (after_ms)
+- retry reason (for observability)
+
+Hosts are responsible for:
+
+- sleeping
+- scheduling
+- concurrency control
+
+---
+
+## 8. Observability Recommendations
+
+Hosts SHOULD log or emit:
+
+- decision type
+- retry reason
+- retry delay
+- attempt number
+
+These values are available via core decision output or FFI getters.
+
+---
+
+## 9. Determinism Guidelines
+
+To preserve deterministic behavior:
+
+- Avoid random jitter unless explicitly configured
+- Use consistent outcome mapping
+- Ensure retry policy inputs are stable
+
+---
+
+## 10. Summary
+
+- `transport-core` defines what to do
+- The host defines what happened
+- Retry behavior is driven by semantic outcomes, not transport details
+
+> Semantic in, decision out.
+> HTTP and runtime details stay outside the core.

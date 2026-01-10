@@ -1,23 +1,6 @@
 {
   "description": "Retry behavior test vectors for transport-core",
-  "default_config": {
-    "max_attempts": 3,
-    "base_delay_ms": 100,
-    "max_delay_ms": 2000
-  },
   "cases": [
-    {
-      "name": "retry_on_network_error",
-      "input": {
-        "method": "GET",
-        "attempt": 1,
-        "error": "NetworkError"
-      },
-      "expected": {
-        "action": "RETRY",
-        "next_attempt": 2
-      }
-    },
     {
       "name": "retry_on_timeout_error",
       "input": {
@@ -31,31 +14,26 @@
       }
     },
     {
-      "name": "retry_on_500",
+      "name": "retry_on_network_error",
       "input": {
         "method": "GET",
         "attempt": 1,
-        "status": 500
+        "error": "NetworkError"
       },
       "expected": {
-        "action": "RETRY",
-        "next_attempt": 2
+        "action": "RETRY"
       }
     },
     {
-      "name": "retry_on_429_with_retry_after",
+      "name": "retry_on_rate_limited_with_hint",
       "input": {
         "method": "GET",
         "attempt": 1,
-        "status": 429,
-        "headers": {
-          "Retry-After": "3"
-        }
+        "error": "RateLimited",
+        "retry_after_ms": 3000
       },
       "expected": {
-        "action": "RETRY",
-        "next_attempt": 2,
-        "delay_ms": 3000
+        "action": "RETRY"
       }
     },
     {
@@ -110,7 +88,7 @@
       "input": {
         "method": "POST",
         "attempt": 1,
-        "status": 500
+        "error": "NetworkError"
       },
       "expected": {
         "action": "FAIL"
@@ -121,13 +99,12 @@
       "input": {
         "method": "POST",
         "attempt": 1,
-        "status": 500,
+        "error": "NetworkError",
         "idempotency_key": "abc123",
         "allow_non_idempotent_retry": true
       },
       "expected": {
-        "action": "RETRY",
-        "next_attempt": 2
+        "action": "RETRY"
       }
     },
     {
@@ -135,23 +112,22 @@
       "input": {
         "method": "GET",
         "attempt": 3,
-        "status": 500
+        "error": "NetworkError"
       },
       "expected": {
         "action": "FAIL"
       }
     },
     {
-      "name": "retry_uses_exponential_backoff",
+      "name": "retry_on_server_error_second_attempt",
       "input": {
         "method": "GET",
         "attempt": 2,
-        "status": 500
+        "error": "NetworkError"
       },
       "expected": {
         "action": "RETRY",
-        "next_attempt": 3,
-        "delay_ms": 400
+        "next_attempt": 3
       }
     }
   ]

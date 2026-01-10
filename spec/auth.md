@@ -1,174 +1,180 @@
-# Authentication Behavior Specification
+# Authentication Semantics — Host-Level Guidance
 
-This document defines the canonical authentication behavior for `transport-core`.
+⚠️ **Non-normative document**
 
-All implementations (native, WASM, and reimplementations such as Go) MUST follow
-the rules defined in this document exactly.
+This document provides **host-side guidance** for integrating authentication
+flows with `transport-core`.
 
-Authentication behavior is defined as a deterministic state machine and MUST
-integrate with retry semantics.
+The **canonical and normative behavior** of authentication decisions is defined
+in [`spec/README.md`](./README.md).
+
+This document explains how a host SHOULD coordinate authentication providers,
+token refresh, and concurrent requests when interacting with `transport-core`.
 
 ---
 
 ## 1. Scope
 
-This specification defines:
+This document describes:
 
-- How authentication data is applied to requests
-- How authentication failures are handled
-- How token refresh is coordinated
-- How concurrent requests interact with authentication state
+- Recommended authentication flow coordination
+- Token refresh handling
+- Concurrency considerations
+- Mapping authentication outcomes into core inputs
 
-This specification does NOT define:
+This document does NOT define:
 
 - Credential formats
-- Token storage format
-- Specific authentication protocols (OAuth, API key, etc.)
+- Token storage mechanisms
+- Authentication protocols (OAuth, API keys, etc.)
+- Network request execution
 
 ---
 
-## 2. Authentication Provider Contract
+## 2. Core Design Recap
 
-An Authentication Provider MUST expose the following behaviors:
+`transport-core`:
 
-- Apply authentication data to an outgoing request
-- Decide whether a request is eligible for refresh on authentication failure
-- Perform a refresh operation when requested
+- does NOT perform authentication
+- does NOT execute refresh operations
+- does NOT manage request lifecycles
 
-The transport layer MUST treat the provider as a black box and MUST NOT
-inspect or modify credentials directly.
+Instead:
 
----
-
-## 3. Authentication Application
-
-Before a request is sent:
-
-- The client MUST invoke the authentication provider to apply credentials
-- Authentication data MUST be applied exactly once per attempt
-- Authentication data MUST NOT be mutated during request transmission
-
-Failure to apply authentication data MUST cause the request to fail immediately.
+> **The host executes authentication.  
+> The core only signals when refresh is required or forbidden.**
 
 ---
 
-## 4. Unauthorized Response Handling (HTTP 401)
+## 3. Authentication Provider Contract (Host Perspective)
 
-When an HTTP 401 response is received:
+Hosts SHOULD provide an authentication provider capable of:
 
-1. The client MUST consult the authentication provider
-2. The provider MUST return one of the following decisions:
+- Applying credentials to outgoing requests
+- Deciding whether a request is eligible for refresh
+- Performing a refresh operation when requested
+
+The provider is treated as a **black box** by the host.
+
+---
+
+## 4. Authentication Failure Handling
+
+When a request fails due to authentication issues (e.g. HTTP 401):
+
+1. The host determines this is an authentication failure
+2. The host consults the authentication provider
+3. The provider returns one of:
    - `RefreshAndRetry`
    - `Fail`
+4. The host passes this decision into `transport-core`
 
-If the provider returns `Fail`, the request MUST fail immediately.
-
----
-
-## 5. Token Refresh Flow
-
-If the provider returns `RefreshAndRetry`:
-
-1. The client MUST initiate a token refresh operation
-2. The original request MUST be paused
-3. If refresh succeeds:
-   - The original request MUST be retried
-4. If refresh fails:
-   - The original request MUST fail
-
-The refresh operation MUST complete before any dependent retries occur.
+The core then decides whether refresh is allowed based on its internal state.
 
 ---
 
-## 6. Refresh Concurrency Rules
+## 5. Refresh Signaling and Execution
 
-At most **one** refresh operation MAY be in progress at any time.
+When `transport-core` returns:
 
-If multiple requests encounter HTTP 401 concurrently:
+```text
+Decision::RefreshAndRetry
+```
 
-- Only one request MAY perform the refresh
-- All other requests MUST wait for the refresh result
-- After refresh completes:
-  - If successful, waiting requests MUST retry
-  - If failed, waiting requests MUST fail
+The host SHOULD:
 
-No request MAY initiate a second refresh while one is already in progress.
+1. Perform a single refresh operation
+2. Report the result (`success` or `failure`) back to the core
+3. Retry or fail the request based on the next decision
+
+The core itself never performs refresh.
+
+---
+
+## 6. Refresh Concurrency (Single-Flight)
+
+Recommended behavior:
+
+- At most one refresh operation SHOULD be in progress per client instance
+- Concurrent requests encountering auth failure SHOULD:
+  - wait for the refresh result
+  - reuse the result of the in-flight refresh
+
+This behavior aligns with the core’s internal `AuthState`.
 
 ---
 
 ## 7. Refresh Attempt Limits
 
-- A refresh operation MUST be attempted at most once per request lifecycle
-- If a request receives HTTP 401 again after a successful refresh:
-  - The request MUST fail
-  - No further refresh attempts are allowed
+- A refresh SHOULD be attempted at most once per request lifecycle
+- If a request encounters auth failure again after a successful refresh:
+  - The host SHOULD fail the request
+  - No further refresh attempts SHOULD be made
 
-This rule prevents infinite refresh loops.
-
----
-
-## 8. Interaction with Retry Semantics
-
-Authentication refresh is orthogonal to retry attempts.
-
-Rules:
-
-- A refresh-triggered retry DOES count as a retry attempt
-- Retry limits defined in `retry.md` MUST still be enforced
-- If retry limits are exhausted, the request MUST fail even if refresh succeeds
+This prevents infinite refresh loops.
 
 ---
 
-## 9. Non-401 Authentication Errors
+## 8. Interaction with Retry Policy
 
-The client MUST NOT attempt refresh for:
+Authentication refresh is orthogonal to retry semantics.
 
-- HTTP 403 responses
+Notes:
+
+- A refresh-triggered retry MAY count as an attempt (host-defined)
+- Retry limits are enforced by host-provided `RequestContext`
+- The core only evaluates whether retry is allowed
+
+---
+
+## 9. Non-Refreshable Authentication Errors
+
+Hosts SHOULD NOT attempt refresh for:
+
+- Authorization failures (e.g. HTTP 403)
+- Explicit credential rejection
 - Malformed authentication data
-- Explicit authentication failure responses
 
-These errors MUST fail immediately.
-
----
-
-## 10. State Isolation
-
-- Authentication state MUST be shared across requests within the same client instance
-- Authentication state MUST NOT be shared across different client instances
-- Request-specific data MUST NOT leak into authentication state
+Such failures SHOULD be mapped to non-retryable outcomes.
 
 ---
 
-## 11. Observability Requirements
+## 10. State Scope and Isolation
 
-Authentication events MUST emit observable metadata, including:
+- Authentication state SHOULD be scoped to a single client instance
+- Authentication state SHOULD NOT leak across clients
+- Request-specific data MUST NOT be stored in auth state
 
-- Refresh start
-- Refresh success
-- Refresh failure
+---
+
+## 11. Observability Recommendations
+
+Hosts SHOULD emit observable signals for:
+
+- Refresh started
+- Refresh succeeded
+- Refresh failed
 - Requests waiting on refresh
 
-No sensitive credential data MAY be exposed in observability output.
+Sensitive credential data MUST NOT be logged.
 
 ---
 
-## 12. Determinism Guarantee
+## 12. Determinism Guidelines
 
-Given the same sequence of requests and responses, authentication behavior
-MUST be deterministic.
+To preserve deterministic behavior:
 
-Race conditions, duplicate refreshes, and non-deterministic outcomes
-are considered specification violations.
+- Ensure refresh decisions are consistent
+- Avoid duplicate or parallel refresh execution
+- Use stable mappings between auth failures and core inputs
 
 ---
 
-## 13. Compliance
+## 13. Summary
 
-An implementation is considered compliant if:
+- Authentication execution is a host responsibility
+- `transport-core` only coordinates decisions
+- Refresh is signaled, not performed, by the core
 
-- It enforces single-flight refresh behavior
-- It prevents infinite refresh loops
-- It integrates correctly with retry limits
-- It produces identical authentication decisions for identical inputs
-
-The Rust implementation serves as a reference, but behavior is defined by this specification.
+> Auth happens outside.
+> Coordination happens inside.

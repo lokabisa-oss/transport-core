@@ -27,6 +27,7 @@ struct RetryInput {
     attempt: u8,
     status: Option<u16>,
     error: Option<String>,
+    retry_after_ms: Option<u32>,
     idempotency_key: Option<String>,
     allow_non_idempotent_retry: Option<bool>,
     auth_decision: Option<String>,
@@ -64,6 +65,11 @@ fn parse_outcome(input: &RetryInput) -> Outcome {
         return match err.as_str() {
             "NetworkError" => Outcome::NetworkError,
             "TimeoutError" => Outcome::TimeoutError,
+            "RateLimited" => Outcome::RateLimited {
+                retry_after_ms: input.retry_after_ms,
+            },
+            "Blocked" => Outcome::Blocked,
+            "Captcha" => Outcome::Captcha,
             _ => panic!("unknown error: {}", err),
         };
     }
@@ -111,18 +117,29 @@ fn retry_vectors_should_match_spec() {
             None,
         );
 
-        let expected = match case.expected.action.as_str() {
-            "RETRY" => Decision::Retry,
-            "REFRESH_AND_RETRY" => Decision::RefreshAndRetry,
-            "FAIL" => Decision::Fail,
-            "PROCEED" => Decision::Proceed,
-            v => panic!("unknown expected action: {}", v),
-        };
+        let actual_action = decision_action(&decision);
 
         assert_eq!(
-            decision, expected,
+            actual_action,
+            case.expected.action,
             "retry test failed: {}",
             case.name
         );
+
+        if case.expected.action == "FAIL" {
+            if let Decision::Fail { retryable, .. } = decision {
+                assert!(!retryable, "FAIL must not be retryable");
+            }
+        }
+    }
+}
+
+
+fn decision_action(decision: &Decision) -> &'static str {
+    match decision {
+        Decision::Proceed => "PROCEED",
+        Decision::Retry { .. } => "RETRY",
+        Decision::RefreshAndRetry { .. } => "REFRESH_AND_RETRY",
+        Decision::Fail { .. } => "FAIL",
     }
 }

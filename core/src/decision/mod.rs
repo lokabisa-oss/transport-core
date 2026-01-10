@@ -1,9 +1,18 @@
 use crate::{
-    auth::AuthDecision,
-    auth::AuthState,
+    auth::{AuthDecision, AuthState},
     error::{classify_http_status, ErrorCategory},
-    model::{Decision, Outcome, RequestContext},
-    retry::can_retry,
+    model::{
+        Decision,
+        Outcome,
+        RequestContext,
+        RetryReason,
+        FailReason,
+    },
+    retry::{
+        can_retry,
+        retry_delay_ms,
+        clamp_retry_after,
+    },
 };
 
 pub fn decide(
@@ -14,63 +23,130 @@ pub fn decide(
     refresh_result: Option<bool>,
 ) -> Decision {
     match outcome {
-        Outcome::NetworkError | Outcome::TimeoutError => {
+        Outcome::RateLimited { retry_after_ms } => {
             if can_retry(ctx) {
-                Decision::Retry
+                let base = retry_delay_ms(ctx, RetryReason::RateLimited);
+                let after_ms = match retry_after_ms {
+                    Some(ms) => clamp_retry_after(ms),
+                    None => base,
+                };
+
+                Decision::Retry {
+                    after_ms,
+                    reason: RetryReason::RateLimited,
+                }
             } else {
-                Decision::Fail
+                Decision::Fail {
+                    reason: FailReason::MaxAttemptsExceeded,
+                    retryable: false,
+                }
+            }
+        }
+    
+        Outcome::Blocked | Outcome::Captcha => {
+            Decision::Fail {
+                reason: FailReason::HardBlocked,
+                retryable: false,
             }
         }
 
+        Outcome::NetworkError => {
+            if can_retry(ctx) {
+                Decision::Retry {
+                    after_ms: retry_delay_ms(ctx, RetryReason::NetworkError),
+                    reason: RetryReason::NetworkError,
+                }
+            } else {
+                Decision::Fail {
+                    reason: FailReason::MaxAttemptsExceeded,
+                    retryable: false,
+                }
+            }
+        }
+
+        Outcome::TimeoutError => {
+            if can_retry(ctx) {
+                Decision::Retry {
+                    after_ms: retry_delay_ms(ctx, RetryReason::Timeout),
+                    reason: RetryReason::Timeout,
+                }
+            } else {
+                Decision::Fail {
+                    reason: FailReason::MaxAttemptsExceeded,
+                    retryable: false,
+                }
+            }
+        }
+
+        // NOTE:
+        // HttpStatus is a legacy fallback.
+        // Prefer semantic Outcome (RateLimited, Blocked, Captcha)
+        // from host environments when possible.
         Outcome::HttpStatus(status) => match classify_http_status(status) {
             ErrorCategory::AuthError => {
-                // Refresh sudah pernah dicoba → fail (no infinite loop)
                 if auth_state.refresh_attempted {
-                    return Decision::Fail;
+                    return Decision::Fail {
+                        reason: FailReason::AuthFailed,
+                        retryable: false,
+                    };
                 }
-            
+
                 match auth_decision {
                     Some(AuthDecision::RefreshAndRetry) => {
-                        // Tandai bahwa refresh sudah dicoba
                         auth_state.refresh_attempted = true;
                         auth_state.refresh_in_progress = true;
-            
+
                         match refresh_result {
-                            // Refresh sukses → retry
                             Some(true) => {
                                 auth_state.refresh_in_progress = false;
                                 if can_retry(ctx) {
-                                    Decision::RefreshAndRetry
+                                    Decision::RefreshAndRetry {
+                                        after_ms: retry_delay_ms(ctx, RetryReason::AuthExpired),
+                                    }
                                 } else {
-                                    Decision::Fail
+                                    Decision::Fail {
+                                        reason: FailReason::MaxAttemptsExceeded,
+                                        retryable: false,
+                                    }
                                 }
                             }
-            
-                            // Refresh gagal → fail
                             Some(false) => {
                                 auth_state.refresh_in_progress = false;
-                                Decision::Fail
+                                Decision::Fail {
+                                    reason: FailReason::AuthFailed,
+                                    retryable: false,
+                                }
                             }
-            
-                            // Refresh belum dieksekusi (signal untuk host)
-                            None => Decision::RefreshAndRetry,
+                            None => Decision::RefreshAndRetry {
+                                after_ms: 0,
+                            },
                         }
                     }
-            
-                    // Provider tidak mengizinkan refresh
-                    _ => Decision::Fail,
-                }
-            },            
-
-            ErrorCategory::RateLimitError | ErrorCategory::NetworkError => {
-                if can_retry(ctx) {
-                    Decision::Retry
-                } else {
-                    Decision::Fail
+                    _ => Decision::Fail {
+                        reason: FailReason::AuthFailed,
+                        retryable: false,
+                    },
                 }
             }
 
-            _ => Decision::Fail,
+            ErrorCategory::RateLimitError => {
+                if can_retry(ctx) {
+                    Decision::Retry {
+                        after_ms: retry_delay_ms(ctx, RetryReason::RateLimited),
+                        reason: RetryReason::RateLimited,
+                    }
+                } else {
+                    Decision::Fail {
+                        reason: FailReason::MaxAttemptsExceeded,
+                        retryable: false,
+                    }
+                }
+            }
+
+            _ => Decision::Fail {
+                reason: FailReason::Unknown,
+                retryable: false,
+            },
         },
     }
 }
