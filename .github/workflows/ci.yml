@@ -13,25 +13,41 @@ jobs:
     name: Rust core tests
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        rust: [1.72.0, stable]
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
+          toolchain: ${{ matrix.rust }}
 
-      - name: Rust fmt
-        run: |
-          cd core
-          cargo fmt -- --check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
 
       - name: Rust tests
         run: |
           cd core
           cargo test --all
+
+  fmt:
+    name: Rust fmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust fmt
+        run: |
+          cd core
+          cargo fmt -- --check
 
   # =========================
   # 2. C ABI Smoke Test
@@ -39,10 +55,17 @@ jobs:
   ffi:
     name: C ABI smoke
     runs-on: ubuntu-latest
-    needs: rust
+    needs: [rust, fmt]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
 
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -71,10 +94,17 @@ jobs:
   python:
     name: Python binding
     runs-on: ubuntu-latest
-    needs: rust
+    needs: [rust, fmt]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
 
       - name: Set up Python
         uses: actions/setup-python@v5
