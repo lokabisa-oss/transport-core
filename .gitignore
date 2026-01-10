@@ -1,6 +1,9 @@
-# Rust
-core/target/
+# Rust library lockfile
+core/Cargo.lock
+
+# Rust build output
 target/
+core/target/
 
 # Python
 __pycache__/
