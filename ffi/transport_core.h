@@ -11,7 +11,7 @@ extern "C" {
 /* ============================
  * ABI VERSION
  * ============================ */
-#define TRANSPORT_CORE_ABI_VERSION 0
+#define TRANSPORT_CORE_ABI_VERSION 1
 
 /* ============================
  * OPAQUE HANDLE
@@ -32,11 +32,16 @@ typedef enum {
     TC_HTTP_OPTIONS
 } tc_http_method_t;
 
-/* Outcome Type */
+/* Semantic Outcome */
 typedef enum {
     TC_OUTCOME_NETWORK_ERROR = 0,
     TC_OUTCOME_TIMEOUT_ERROR,
-    TC_OUTCOME_HTTP_STATUS
+    TC_OUTCOME_HTTP_STATUS,
+
+    /* semantic-first outcomes */
+    TC_OUTCOME_RATE_LIMITED,
+    TC_OUTCOME_BLOCKED,
+    TC_OUTCOME_CAPTCHA
 } tc_outcome_kind_t;
 
 /* Decision */
@@ -52,6 +57,22 @@ typedef enum {
     TC_AUTH_REFRESH_AND_RETRY = 0,
     TC_AUTH_FAIL
 } tc_auth_decision_t;
+
+/* Retry Reason */
+typedef enum {
+    TC_RETRY_REASON_NETWORK = 0,
+    TC_RETRY_REASON_TIMEOUT,
+    TC_RETRY_REASON_RATE_LIMITED,
+    TC_RETRY_REASON_AUTH_EXPIRED
+} tc_retry_reason_t;
+
+/* Fail Reason */
+typedef enum {
+    TC_FAIL_REASON_UNKNOWN = 0,
+    TC_FAIL_REASON_MAX_ATTEMPTS,
+    TC_FAIL_REASON_AUTH_FAILED,
+    TC_FAIL_REASON_HARD_BLOCKED
+} tc_fail_reason_t;
 
 /* ============================
  * STRUCTS
@@ -69,17 +90,19 @@ typedef struct {
 /* Outcome */
 typedef struct {
     tc_outcome_kind_t kind;
-    uint16_t http_status; /* only valid if kind == HTTP_STATUS */
+
+    /* Only valid for HTTP_STATUS */
+    uint16_t http_status;
+
+    /* Only valid for RATE_LIMITED */
+    uint32_t retry_after_ms;
 } tc_outcome_t;
 
 /* ============================
  * LIFECYCLE
  * ============================ */
 
-/* Create client */
 transport_core_client_t* tc_client_new(void);
-
-/* Destroy client */
 void tc_client_free(transport_core_client_t* client);
 
 /* ============================
@@ -87,8 +110,6 @@ void tc_client_free(transport_core_client_t* client);
  * ============================ */
 
 /*
- * Decide next action.
- *
  * refresh_result:
  *   -1 = refresh not attempted
  *    0 = refresh failed
@@ -101,6 +122,15 @@ tc_decision_t tc_decide(
     tc_auth_decision_t auth_decision,
     int8_t refresh_result
 );
+
+/* ============================
+ * DECISION DETAILS (GETTERS)
+ * ============================ */
+
+uint32_t tc_last_retry_after_ms(const transport_core_client_t* client);
+uint8_t  tc_last_retry_reason(const transport_core_client_t* client);
+uint8_t  tc_last_fail_reason(const transport_core_client_t* client);
+bool     tc_last_fail_retryable(const transport_core_client_t* client);
 
 #ifdef __cplusplus
 }
